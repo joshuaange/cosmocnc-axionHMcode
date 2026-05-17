@@ -123,19 +123,18 @@ class halo_mass_function:
                 # Solve on coarse grid
                 if "n_mass_points_coarse" in self.cosmology.cosmo_params:
                     n_coarse = self.cosmology.cosmo_params["n_mass_points_coarse"]
-                    M_coarse = np.exp(np.linspace(np.log(M_vec.min()), np.log(M_vec.max()), n_coarse))
-                    R_200c_coarse = (3. * M_coarse / (4. * np.pi * rho_crit_z * 200.))**(1./3.)
+                    M_vec_coarse = np.exp(np.linspace(np.log(M_vec.min()), np.log(M_vec.max()), n_coarse))
+                    R_200c_coarse = (3. * M_vec_coarse / (4. * np.pi * rho_crit_z * 200.))**(1./3.)
                     
-                    Mvir_coarse = find_M_vir_from_M_200c(M_coarse, R_200c_coarse,
-                                                          rho_m, rho_crit_z,
-                                                          Delta_vir, c_min, redshift, Om0, sigma_r,
-                                                          normalisation, delta_c, E_z,
-                                                          self.cosmology.D_grid_z_full,
-                                                          self.cosmology.D_grid_full,
-                                                          min_factor=0.1, max_factor=20)
+                    Mvir_coarse = find_M_vir_from_M_200c(M_vec_coarse, R_200c_coarse, 
+                                                       rho_m, rho_crit_z,
+                                                       Delta_vir, c_min, redshift, Om0, sigma_r,
+                                                       self.cosmology.normalisation_cached, delta_c, E_z,
+                                                       self.cosmology.D_grid_z_full, self.cosmology.D_grid_full,
+                                                       min_factor = 0.1, max_factor=20)
                     
                     # Interpolate onto full M_vec grid in log-log space
-                    Mvir_vec = np.exp(np.interp(np.log(M_vec), np.log(M_coarse), np.log(Mvir_coarse)))
+                    Mvir_vec = np.exp(np.interp(np.log(M_vec), np.log(M_vec_coarse), np.log(Mvir_coarse)))
                 else:
                     Mvir_vec = find_M_vir_from_M_200c(M_vec, R_200c, 
                                                        rho_m, rho_crit_z,
