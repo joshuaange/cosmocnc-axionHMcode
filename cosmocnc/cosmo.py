@@ -222,7 +222,7 @@ class cosmology_model:
             self.D_CMB = self.background_cosmology.angular_diameter_distance(self.z_CMB).value
 
 
-        print("cosmo params",self.cosmo_params)
+        #print("cosmo params",self.cosmo_params)
 
 
     def update_cosmology(self,cosmo_params_new,cosmology_tool = "astropy"):
