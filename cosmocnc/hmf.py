@@ -112,7 +112,7 @@ class halo_mass_function:
                 #G_a = func_axionHMcode_D_z_unnorm_int(0., Om0, E_z)_
                 #g_a = func_axionHMcode_D_z_unnorm(redshift, Om0, E_z)*(1+redshift)
                 g_a = np.interp(redshift, self.cosmology.D_grid_z_full, self.cosmology.D_grid_full) * self.cosmology.normalisation_cached * (1 + redshift)
-                G_a = self.cosmology.cosmo_params["G_a_cached"]
+                G_a = self.cosmology.G_a_cached
                 Delta_vir = func_axionHMcode_Delta_vir(redshift, Om0, G_a, E_z, g_a) # note: wrt mean at z=0
 
                 c_min = 5.196 # should turn this into a parameter
