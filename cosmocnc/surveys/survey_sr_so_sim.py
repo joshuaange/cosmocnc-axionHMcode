@@ -112,7 +112,7 @@ class scaling_relations:
             D_A = other_params["D_A"]
 
             A_szifi = self.params["A_szifi"]
-            self.prefactor_logy0 = np.log(10.**(A_szifi)*E_z**2*(self.params["bias_sz"]/3.*h70)**self.params["alpha_szifi"]/np.sqrt(h70))
+            self.prefactor_logy0 = np.log(10.**(A_szifi)*E_z**self.params["beta_szifi"]*(self.params["bias_sz"]/3.*h70)**self.params["alpha_szifi"]/np.sqrt(h70))
             self.prefactor_M_500_to_theta = 6.997*(H0/70.)**(-2./3.)*(self.params["bias_sz"]/3.)**(1./3.)*E_z**(-2./3.)*(500./D_A)
 
     def eval_scaling_relation(self,x0,layer=0,patch_index=0,other_params=None):
@@ -200,7 +200,7 @@ class scaling_relations:
                 D_A = other_params["D_A"]
                 A_szifi = self.params["A_szifi"]
 
-                prefactor_logy0 = np.log(10.**(A_szifi)*E_z**2*(self.params["bias_sz"]/3.*h70)**self.params["alpha_szifi"]/np.sqrt(h70))
+                prefactor_logy0 = np.log(10.**(A_szifi)*E_z**self.params["beta_szifi"]*(self.params["bias_sz"]/3.*h70)**self.params["alpha_szifi"]/np.sqrt(h70))
                 log_y0 = prefactor_logy0 + x0*self.params["alpha_szifi"]
 
                 prefactor_M_500_to_theta = 6.997*(H0/70.)**(-2./3.)*(self.params["bias_sz"]/3.)**(1./3.)*E_z**(-2./3.)*(500./D_A)
