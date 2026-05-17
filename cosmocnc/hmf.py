@@ -109,19 +109,22 @@ class halo_mass_function:
                 # virial
                 rho_m = self.rho_c_0 * Om0 # Msol/Mpc^3
                 #rho_m_with_h_units = rho_m/self.h**2 # h^2 Msol/Mpc
-                G_a = func_axionHMcode_D_z_unnorm_int(0., Om0, E_z)
-                Delta_vir = func_axionHMcode_Delta_vir(redshift, 
-                                                       Om0, G_a, E_z) # note: wrt mean at z=0
+                #G_a = func_axionHMcode_D_z_unnorm_int(0., Om0, E_z)_
+                #g_a = func_axionHMcode_D_z_unnorm(redshift, Om0, E_z)*(1+redshift)
+                g_a = np.interp(redshift, self.cosmology.D_grid_z_full, self.cosmology.D_grid_full) * self.cosmology.normalisation_cached * (1 + redshift)
+                G_a = self.cosmology.cosmo_params["G_a_cached"]
+                Delta_vir = func_axionHMcode_Delta_vir(redshift, Om0, G_a, E_z, g_a) # note: wrt mean at z=0
 
                 c_min = 5.196 # should turn this into a parameter
                 k, ps = self.cosmology.power_spectrum.get_linear_power_spectrum(redshift)
                 sigma_r = sigma_R((k, ps), cosmology=self.cosmology)
-                normalisation = func_axionHMcode_D_z_unnorm(0., Om0, E_z)
-                delta_c   = func_axionHMcode_delta_c(redshift, Om0, G_a, E_z)
+                #normalisation = func_axionHMcode_D_z_unnorm(0., Om0, E_z)
+                delta_c   = func_axionHMcode_delta_c(redshift, Om0, G_a, E_z, g_a)
                 Mvir_vec = find_M_vir_from_M_200c(M_vec, R_200c, 
                                                    rho_m, rho_crit_z,
                                                    Delta_vir, c_min, redshift, Om0, sigma_r,
-                                                   normalisation, delta_c, E_z,
+                                                   self.cosmology.normalisation_cached, delta_c, E_z,
+                                                   self.cosmology.D_grid_z_full, self.cosmology.D_grid_full,
                                                    min_factor = 0.1, max_factor=20)
                 #Mvir_vec_with_h_units = Mvir_vec*self.h # Msol/h
                 R_vir = (3. * Mvir_vec / (4. * np.pi * rho_m * Delta_vir))**(1./3.) # Mpc/h
@@ -148,7 +151,7 @@ class halo_mass_function:
                 M_eval = M_eval / 1e14
             
                 if log == True:
-                    hmf    = hmf * M_eval
+                    hmf    = hmf * M_eval 
                     M_eval = np.log(M_eval)
                     
             if self.hmf_type == "Tinker08":
@@ -390,8 +393,7 @@ def func_axionHMcode_D_z_unnorm_int(redshift, Om0, E_z):
             lambda x: x, 10000)[0]
     return G
     
-def func_axionHMcode_Delta_vir(redshift, Om0, G_a, E_z, version='dome'):   
-    g_a = func_axionHMcode_D_z_unnorm(redshift, Om0, E_z)*(1+redshift)
+def func_axionHMcode_Delta_vir(redshift, Om0, G_a, E_z, g_a, version='dome'):   
     p_10 = -0.79
     p_11 = -10.17
     p_12 = 2.51
@@ -438,25 +440,30 @@ def func_axionHMcode_z_formation(redshift, Mvir_with_h_units, rho_m_with_h_units
         return np.array([solve_single(M) for M in Mvir_with_h_units])
 
 def func_axionHMcode_z_formation_fast(redshift, M_vir_grid, rho_m, Om0,
-                                      sigma_r, normalisation, delta_c, E_z, f=0.01):
+                                      sigma_r, normalisation, delta_c, E_z,
+                                      D_grid_z_full, D_grid_full, f=0.01):
     #Precomputes z_formation on a mass grid using vectorized sigma and a single precomputed D(z) interpolation table.
     # Precompute D(z)/D(0) on a z grid once
-    z_grid = np.linspace(redshift + 1e-6, 100., 500)
-    D_grid = np.array([func_axionHMcode_D_z_unnorm(z, Om0, E_z) / normalisation
-                       for z in z_grid])
-    D_z = func_axionHMcode_D_z_unnorm(redshift, Om0, E_z) / normalisation
+    mask = D_grid_z_full > redshift
+    z_grid = D_grid_z_full[mask]
+    D_grid = D_grid_full[mask]
+    D_z = np.interp(redshift, D_grid_z_full, D_grid_full)
 
     # Vectorized sigma for all masses at once
     sigma_grid = sigma_r.get_sigma_M(f * M_vir_grid, rho_m, get_deriv=False)
     target_grid = D_z * delta_c / sigma_grid
 
     # For each mass, find z_f by interpolating the inverse D(z) table
-    def z_f_from_target(target):
-        if target >= D_grid[0] or target <= D_grid[-1]:
-            return redshift  # no root, z_f = z
-        return np.interp(target, D_grid[::-1], z_grid[::-1])
-
-    z_f_grid = np.array([z_f_from_target(t) for t in target_grid])
+    #def z_f_from_target(target):
+    #    if target >= D_grid[0] or target <= D_grid[-1]:
+    #        return redshift  # no root, z_f = z
+    #    return np.interp(target, D_grid[::-1], z_grid[::-1])
+    #z_f_grid = np.array([z_f_from_target(t) for t in target_grid])
+    z_f_grid = np.where(
+        (target_grid >= D_grid[0]) | (target_grid <= D_grid[-1]),
+        redshift,
+        np.interp(target_grid, D_grid[::-1], z_grid[::-1])
+    )
 
     # Return a fast interpolator over log(Mvir)
     log_M_grid = np.log(M_vir_grid)
@@ -465,8 +472,7 @@ def func_axionHMcode_z_formation_fast(redshift, M_vir_grid, rho_m, Om0,
 
     return z_formation_interp
 
-def func_axionHMcode_delta_c(redshift, Om0, G_a, E_z, version='dome'):    
-    g_a = func_axionHMcode_D_z_unnorm(redshift, Om0, E_z)*(1+redshift)
+def func_axionHMcode_delta_c(redshift, Om0, G_a, E_z, g_a, version='dome'):    
     p_10 = -0.0069
     p_11 = -0.0208
     p_12 = 0.0312
@@ -490,7 +496,8 @@ def func_axionHMcode_delta_c(redshift, Om0, G_a, E_z, version='dome'):
 
 def find_M_vir_from_M_200c(M_vec_with_h, R_200c_with_h, rho_m_with_h, rho_crit_z_with_h,
                             Delta_vir, c_min, redshift, Om0, sigma_r, 
-                            normalisation, delta_c, E_z, min_factor = 0.1, max_factor=20):
+                            normalisation, delta_c, E_z, D_grid_z_full, D_grid_full,
+                            min_factor = 0.1, max_factor=20):
     def g(x):
         # NFW enclosed mass shape function
         return np.log(1. + x) - x / (1. + x)
@@ -500,7 +507,8 @@ def find_M_vir_from_M_200c(M_vec_with_h, R_200c_with_h, rho_m_with_h, rho_crit_z
         300))
     z_formation_interp = func_axionHMcode_z_formation_fast(
         redshift, M_vir_grid, rho_m_with_h, Om0,
-        sigma_r, normalisation, delta_c, E_z, f=0.01)
+        sigma_r, normalisation, delta_c, E_z, 
+        D_grid_z_full, D_grid_full, f=0.01)
 
     def residual_single(log_Mvir, M200c, R200c):
         Mvir = np.exp(log_Mvir)

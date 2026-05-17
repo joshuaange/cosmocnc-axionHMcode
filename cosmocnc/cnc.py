@@ -76,6 +76,20 @@ class cluster_number_counts:
                                          logger = self.logger
                                          )
 
+        if self.cnc_params["hmf_type"] == "ST_axionHMcode":
+            Om0 = self.cosmo_params["Om0"]
+            h = self.cosmology.background_cosmology.H0.value / 100.
+            E_z_init = lambda z: self.cosmology.background_cosmology.H(z).value / (100. * h)
+            self.cosmo_params["G_a_cached"] = func_axionHMcode_D_z_unnorm_int(0., Om0, E_z_init)
+
+            self.cosmology.normalisation_cached = func_axionHMcode_D_z_unnorm(0., Om0, E_z_init)
+            self.cosmology.D_grid_z_full = np.concatenate([
+                        np.linspace(1e-6, 1., 1000),
+                        np.linspace(1., 100., 1000)])
+            self.cosmology.D_grid_full = np.array([
+                func_axionHMcode_D_z_unnorm(z, Om0, E_z_init) / self.cosmology.normalisation_cached
+                for z in self.cosmology.D_grid_z_full])
+
         if self.cnc_params["load_catalogue"] == True:
 
             self.logger.debug("Loading catalogue")
