@@ -1,17 +1,18 @@
 import numpy as np
-import cosmocnc
+import cosmocnc_axionHMcode.cosmocnc as cosmocnc
 import scipy.integrate as integrate
+import logging
 
 class scaling_relations:
 
     def __init__(self,observable="q_mmf3",cnc_params=None,catalogue=None):
 
-        self.logger = cosmocnc.logging.getLogger(__name__)
+        self.logger = logging.getLogger(__name__)
         self.observable = observable
         self.cnc_params = cnc_params
         self.preprecompute = False
         self.catalogue = catalogue
-        self.root_path = cosmocnc.root_path
+        self.root_path = "/scratch/scratch-jange/cosmocnc_axionHMcode/cosmocnc/"
 
 
     def get_n_layers(self):

@@ -2,6 +2,9 @@ import numpy as np
 from mcfit import TophatVar
 import time
 import logging
+from scipy.special import gamma as Gamma
+from scipy import integrate
+from scipy.optimize import brentq
 
 class halo_mass_function:
 
@@ -40,7 +43,7 @@ class halo_mass_function:
 
         self.const = constants()
 
-        if self.hmf_type == "Tinker08":
+        if self.hmf_type in ["Tinker08", "ST_axionHMcode"]:
 
             self.rho_c_0 = self.cosmology.background_cosmology.critical_density(0.).value*self.const.mpc**3/self.const.solar*1e3
 
@@ -91,6 +94,66 @@ class halo_mass_function:
 
         if self.hmf_calc == "cnc":
 
+            if self.hmf_type == "ST_axionHMcode":
+
+                if self.mass_definition is not "200c":
+                    print("ST_axionHMcode not yet updated to work with non-200c mass definitions")
+                # note: axionHMcode uses h units
+
+                # 200c
+                Om0 = self.cosmology.cosmo_params["Om0"]
+                Ow0 = 1 - Om0
+                rho_crit_z = self.rho_c_0 * func_axionHMcode_E_z(redshift, Om0, Ow0)**2 # Msol/Mpc^3
+                R_200c = (3. * M_vec / (4. * np.pi * rho_crit_z* 200.))**(1./3.) # Mpc
+                # virial
+                rho_m = self.rho_c_0 * Om0 # Msol/Mpc^3
+                rho_m_with_h_units = rho_m/self.h**2 # h^2 Msol/Mpc
+                G_a = func_axionHMcode_D_z_unnorm_int(0., Om0, Ow0)
+                Delta_vir = func_axionHMcode_Delta_vir(redshift, 
+                                                       Om0, 
+                                                       Ow0, G_a) # note: wrt mean at z=0
+
+                c_min = 5.196 # should turn this into a parameter
+                k, ps = self.cosmology.power_spectrum.get_linear_power_spectrum(redshift)
+                sigma_r = sigma_R((k, ps), cosmology=self.cosmology)
+                normalisation = func_axionHMcode_D_z_unnorm(0., Om0, Ow0)
+                delta_c   = func_axionHMcode_delta_c(redshift, Om0, Ow0, G_a)
+                Mvir_vec = find_M_vir_from_M_200c(M_vec, R_200c, 
+                                                   rho_m, rho_crit_z,
+                                                   Delta_vir, c_min, redshift, Om0, Ow0, G_a, sigma_r,
+                                                   normalisation, delta_c,
+                                                   min_factor = 0.1, max_factor=20)
+                Mvir_vec_with_h_units = Mvir_vec*self.h # Msol/h
+                R_vir = (3. * Mvir_vec / (4. * np.pi * rho_m * Delta_vir))**(1./3.) # Mpc/h
+                R_vir_with_h_units = (3. * Mvir_vec_with_h_units / (4. * np.pi * rho_m_with_h_units * Delta_vir))**(1./3.) # Mpc/h
+
+                sigma_r.get_derivative(type_deriv=self.type_deriv)
+                sigma_vir    = np.interp(R_vir,  sigma_r.R_vec, sigma_r.sigma_vec)
+                dsigma_vir   = np.interp(R_vir,  sigma_r.R_vec, sigma_r.dsigma_vec)
+                dMdR_vir     = 4. * np.pi * rho_crit_z * Delta_vir * R_vir**2
+                (sigma, dsigmadR_vir) = sigma_r.get_sigma_M(Mvir_vec, rho_m, get_deriv=True)
+                R_lagrangian = sigma_r.R_eval   # the R that get_sigma_M actually used
+                dM_dR_lagrangian = 4. * np.pi * rho_m * R_lagrangian**2
+                dlnsigma2_dlnMvir = (Mvir_vec / sigma**2) * (2. * sigma * dsigmadR_vir) / dM_dR_lagrangian
+
+                nu = delta_c / sigma
+                p_st = 0.3
+                q_st = 0.707
+                A_st = np.sqrt(2.*q_st)/(np.sqrt(np.pi) + Gamma(0.5-p_st)/2**p_st)  # A ~ 0.2161
+                func_sheth_tormen = A_st * nu * (1. + (q_st ** 0.5 * nu) ** (-2. * p_st)) * np.exp((-q_st * nu ** 2.) / 2.)
+
+                hmf_vir = 0.5 * (rho_m / Mvir_vec**2) * func_sheth_tormen * np.abs(dlnsigma2_dlnMvir) # 1/M_vir dn/dlnM_vir = dn/dM_vir
+                hmf = hmf_vir * np.gradient(Mvir_vec, M_vec) # dn/dM200c
+            
+                M_eval = M_vec
+            
+                hmf    = hmf * 1e14
+                M_eval = M_eval / 1e14
+            
+                if log == True:
+                    hmf    = hmf * M_eval
+                    M_eval = np.log(M_eval)
+                    
             if self.hmf_type == "Tinker08":
 
                 rho_m = self.rho_c_0*self.cosmology.cosmo_params["Om0"]
@@ -297,6 +360,162 @@ def f_sigma(sigma,redshift=None,hmf_type="Tinker08",Delta=None,mass_definition="
         f = A*((sigma/b)**(-a)+1.)*np.exp(-c/sigma**2)
 
     return f
+
+def trapz(y, x):
+    '''
+    Pure python version of trapezoid rule.
+    Taken from https://berkeley-stat159-f17.github.io/stat159-f17/lectures/09-intro-numpy/trapezoid..html
+    '''
+    s = 0
+    for i in range(1, len(x)):
+        s += (x[i]-x[i-1])*(y[i]+y[i-1])
+    return s/2
+
+def func_axionHMcode_E_z(redshift, Om0, Ow0):
+    E2 = Om0*(1+redshift)**3 + Ow0
+    return np.sqrt(np.abs(E2))
+
+def func_axionHMcode_D_z_unnorm(redshift, Om0, Ow0):    
+    #z_array = np.linspace(redshift, 100, 2000)
+    #integrand = (1+z_array) / func_axionHMcode_E_z(z_array, Om0, Ow0)**3
+    
+    #factor = 5 * Om0 / 2
+    #D = factor * func_axionHMcode_E_z(redshift, Om0, Ow0) * trapz(integrand, z_array) # now with Numba trapz
+    #return D
+
+    integrand = lambda zp: (1 + zp) / func_axionHMcode_E_z(zp, Om0, Ow0)**3
+    result, _ = integrate.quad(integrand, redshift, 100.)
+    return 5 * Om0 / 2 * func_axionHMcode_E_z(redshift, Om0, Ow0) * result
+
+def func_axionHMcode_D_z_unnorm_int(redshift, Om0, Ow0):
+    def integrand(y, x):
+        E_x = func_axionHMcode_E_z(x, Om0, Ow0)
+        E_y = func_axionHMcode_E_z(y, Om0, Ow0)
+        return E_x / (1 + x) * (1 + y) / E_y**3
+    G = 5 * Om0 / 2 * integrate.dblquad(
+            integrand, redshift, 10000,
+            lambda x: x, 10000)[0]
+    return G
+    
+def func_axionHMcode_Delta_vir(redshift, Om0, Ow0, G_a, version='dome'):   
+    g_a = func_axionHMcode_D_z_unnorm(redshift, Om0, Ow0)*(1+redshift)
+    p_10 = -0.79
+    p_11 = -10.17
+    p_12 = 2.51
+    p_13 = 6.51
+    p_20 = -1.89
+    p_21 = 0.38
+    p_22 = 18.8
+    p_23 = -15.87
+    f_1 = p_10 + p_11*(1-g_a) + p_12*(1-g_a)**2 + p_13*(1-G_a*(1+redshift))
+    f_2 = p_20 + p_21*(1-g_a) + p_22*(1-g_a)**2 + p_23*(1-G_a*(1+redshift))
+
+    Omega_m_z = Om0 * (1+redshift)**3 / func_axionHMcode_E_z(redshift, Om0, Ow0)**2
+
+    alpha_1 = 1
+    alpha_2 = 2
+    f_frac = 0.
+    if version == 'dome':
+        return 177.7 *(1+0.763*f_frac) * ( 1 + f_1*np.log10(Omega_m_z)**alpha_1 + f_2*np.log10(Omega_m_z)**alpha_2)
+    else:
+        return 177.7 * ( 1 + f_1*np.log10(Omega_m_z)**alpha_1 + f_2*np.log10(Omega_m_z)**alpha_2)
+    
+
+    return f
+
+def func_axionHMcode_z_formation(redshift, Mvir_with_h_units, rho_m_with_h_units,
+                                 Om0, Ow0, G_a, sigma_r, normalisation, delta_c, f=0.01):
+    def solve_single(M_single):
+        sigma = sigma_r.get_sigma_M(f * M_single, rho_m_with_h_units, get_deriv=False)
+        target = func_axionHMcode_D_z_unnorm(redshift, Om0, Ow0) / normalisation * delta_c / sigma
+
+        def func_find_root(x):
+            return func_axionHMcode_D_z_unnorm(x, Om0, Ow0) / normalisation - target
+
+        f_lo = func_find_root(redshift)
+        f_hi = func_find_root(100.)
+
+        if f_lo * f_hi > 0.:
+            return redshift   # no root found, z_f = z by definition
+        return brentq(func_find_root, redshift, 100., xtol=1e-4)
+
+    if isinstance(Mvir_with_h_units, (int, float)):
+        return solve_single(Mvir_with_h_units)
+    else:
+        return np.array([solve_single(M) for M in Mvir_with_h_units])
+
+def func_axionHMcode_delta_c(redshift, Om0, Ow0, G_a, version='dome'):    
+    g_a = func_axionHMcode_D_z_unnorm(redshift, Om0, Ow0)*(1+redshift)
+    p_10 = -0.0069
+    p_11 = -0.0208
+    p_12 = 0.0312
+    p_13 = 0.0021
+    p_20 = 0.0001
+    p_21 = -0.0647
+    p_22 = -0.0417
+    p_23 = 0.0646
+    f_1 = p_10 + p_11*(1-g_a) + p_12*(1-g_a)**2 + p_13*(1-G_a*(1+redshift))
+    f_2 = p_20 + p_21*(1-g_a) + p_22*(1-g_a)**2 + p_23*(1-G_a*(1+redshift))
+
+    Omega_m_z = Om0 * (1+redshift)**3 / func_axionHMcode_E_z(redshift, Om0, Ow0)**2
+
+    alpha_1 = 1
+    alpha_2 = 0
+    f_frac = 0.
+    if version == 'dome':
+        return 1.686 *(1-0.041*f_frac)* ( 1 + f_1*np.log10(Omega_m_z)**alpha_1 + f_2*np.log10(Omega_m_z)**alpha_2)
+    else:
+        return 1.686 * ( 1 + f_1*np.log10(Omega_m_z)**alpha_1 + f_2*np.log10(Omega_m_z)**alpha_2)
+
+def find_M_vir_from_M_200c(M_vec_with_h, R_200c_with_h, rho_m_with_h, rho_crit_z_with_h,
+                            Delta_vir, c_min, redshift, Om0, Ow0, G_a, sigma_r, 
+                            normalisation, delta_c, min_factor = 0.1, max_factor=20):
+    def g(x):
+        # NFW enclosed mass shape function
+        return np.log(1. + x) - x / (1. + x)
+
+    def residual_single(log_Mvir, M200c, R200c):
+        Mvir = np.exp(log_Mvir)
+
+        # concentration from axionHMcode c-M relation
+        z_f = func_axionHMcode_z_formation(redshift, Mvir, rho_m_with_h, Om0, Ow0, G_a, sigma_r, normalisation, delta_c, f=0.01)
+        concentration = c_min * (1. + z_f) / (1. + redshift)
+
+        # virial radius from M_vir definition (w.r.t. mean density at z=0)
+        R_vir = (3. * Mvir / (4. * np.pi * rho_m_with_h * Delta_vir))**(1./3.)
+        r_s   = R_vir / concentration
+
+        # NFW characteristic density (delta_char * rho_mean)
+        # rho(r) = delta_char * rho_m / ((r/r_s)(1+r/r_s)^2)
+        # such that M(<R_vir) = M_vir by construction
+        delta_char = Delta_vir * concentration**3 / (3. * g(concentration))
+
+        # enclosed mass at R_200c
+        x_200c = R200c / r_s
+        M_enc  = 4. * np.pi * delta_char * rho_m_with_h * r_s**3 * g(x_200c)
+
+        return M_enc - M200c
+
+    def solve_single(M200c, R200c):
+        # Bracket in log(M_vir): M_vir is usually within factor ~2 of M_200c
+        log_lo = np.log(min_factor * M200c)
+        log_hi = np.log(max_factor * M200c)
+
+        # Check bracket is valid
+        f_lo = residual_single(log_lo, M200c, R200c)
+        f_hi = residual_single(log_hi, M200c, R200c)
+
+        if f_lo * f_hi > 0.:
+            print(f"Bracket failed for M200c {M200c}. Falling back to constant-ratio approximation")
+            ratio = (200. * rho_crit_z_with_h / (Delta_vir * rho_m_with_h))
+            return M200c * ratio
+
+        log_Mvir = brentq(residual_single, log_lo, log_hi,
+                          args=(M200c, R200c), xtol=1e-8, rtol=1e-6)
+        return np.exp(log_Mvir)
+        
+    solve_vec = np.vectorize(solve_single)
+    return solve_vec(M_vec_with_h, R_200c_with_h)
 
 class hmf_params:
 
