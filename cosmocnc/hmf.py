@@ -120,6 +120,22 @@ class halo_mass_function:
                 sigma_r = sigma_R((k, ps), cosmology=self.cosmology)
                 #normalisation = func_axionHMcode_D_z_unnorm(0., Om0, E_z)
                 delta_c   = func_axionHMcode_delta_c(redshift, Om0, G_a, E_z, g_a)
+                # Solve on coarse grid
+                if "n_mass_points_coarse" in self.cosmology.cosmo_params:
+                    n_coarse = self.cosmo_params["n_mass_points_coarse"]
+                    M_coarse = np.exp(np.linspace(np.log(M_vec.min()), np.log(M_vec.max()), n_coarse))
+                    R_200c_coarse = (3. * M_coarse / (4. * np.pi * rho_crit_z * 200.))**(1./3.)
+                    
+                    Mvir_coarse = find_M_vir_from_M_200c(M_coarse, R_200c_coarse,
+                                                          rho_m, rho_crit_z,
+                                                          Delta_vir, c_min, redshift, Om0, sigma_r,
+                                                          normalisation, delta_c, E_z,
+                                                          self.cosmology.D_grid_z_full,
+                                                          self.cosmology.D_grid_full,
+                                                          min_factor=0.1, max_factor=20)
+                    
+                    # Interpolate onto full M_vec grid in log-log space
+                    Mvir_vec = np.exp(np.interp(np.log(M_vec), np.log(M_coarse), np.log(Mvir_coarse)))
                 Mvir_vec = find_M_vir_from_M_200c(M_vec, R_200c, 
                                                    rho_m, rho_crit_z,
                                                    Delta_vir, c_min, redshift, Om0, sigma_r,
