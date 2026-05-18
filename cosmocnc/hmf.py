@@ -96,7 +96,11 @@ class halo_mass_function:
 
             if self.hmf_type == "ST_axionHMcode":
 
-                if self.mass_definition is not "200c":
+                if self.mass_definition == "200c":
+                    Del = 200
+                elif self.mass_definition == "500c":
+                    Del = 500
+                else:
                     print("ST_axionHMcode not yet updated to work with non-200c mass definitions")
                 # note: axionHMcode uses h units
 
@@ -105,7 +109,7 @@ class halo_mass_function:
                 # 200c
                 Om0 = self.cosmology.cosmo_params["Om0"]
                 rho_crit_z = self.rho_c_0 * E_z(redshift)**2 # Msol/Mpc^3
-                R_200c = (3. * M_vec / (4. * np.pi * rho_crit_z* 200.))**(1./3.) # Mpc
+                R_200c = (3. * M_vec / (4. * np.pi * rho_crit_z* Del))**(1./3.) # Mpc
                 # virial
                 rho_m = self.rho_c_0 * Om0 # Msol/Mpc^3
                 #rho_m_with_h_units = rho_m/self.h**2 # h^2 Msol/Mpc
@@ -124,7 +128,7 @@ class halo_mass_function:
                 if "n_mass_points_coarse" in self.cosmology.cosmo_params:
                     n_coarse = self.cosmology.cosmo_params["n_mass_points_coarse"]
                     M_vec_coarse = np.exp(np.linspace(np.log(M_vec.min()), np.log(M_vec.max()), n_coarse))
-                    R_200c_coarse = (3. * M_vec_coarse / (4. * np.pi * rho_crit_z * 200.))**(1./3.)
+                    R_200c_coarse = (3. * M_vec_coarse / (4. * np.pi * rho_crit_z * Del))**(1./3.)
                     
                     Mvir_coarse = find_M_vir_from_M_200c(M_vec_coarse, R_200c_coarse, 
                                                        rho_m, rho_crit_z,
