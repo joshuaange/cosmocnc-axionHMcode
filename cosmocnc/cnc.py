@@ -161,6 +161,11 @@ class cluster_number_counts:
 
     def get_hmf(self,volume_element=True):
 
+        if return_profile_params and not (self.cnc_params["hmf_type"] == "ST_axionHMcode"):
+            print("Returning profile parameters is only currently allowed with hmf_type=ST_axionHMcode")
+        elif return_profile_params:
+            self.profile_params = {}
+
         if self.cnc_params["hmf_type"] == "ST_axionHMcode":
             if "G_a_precomputed" in self.cosmo_params:
                 self.cosmology.G_a_cached          = self.cosmo_params["G_a_precomputed"]
@@ -199,7 +204,8 @@ class cluster_number_counts:
         self.halo_mass_function = halo_mass_function(cosmology=self.cosmology,hmf_type=self.cnc_params["hmf_type"],
         mass_definition=self.cnc_params["mass_definition"],M_min=self.cnc_params["M_min"],M_min_cutoff=self.cnc_params["M_min_cutoff"],
         M_max=self.cnc_params["M_max"],n_points=self.cnc_params["n_points"],type_deriv=self.cnc_params["hmf_type_deriv"],
-        hmf_calc=self.cnc_params["hmf_calc"],extra_params=self.hmf_extra_params,logger = self.logger,interp_tinker=self.cnc_params["interp_tinker"])
+        hmf_calc=self.cnc_params["hmf_calc"],extra_params=self.hmf_extra_params,logger = self.logger,interp_tinker=self.cnc_params["interp_tinker"],
+        include_wl_bias=self.cnc_params["include_wl_bias"],c=self.cnc_params["return_profile_params"])
 
         n_cores = self.cnc_params["number_cores_hmf"]
         indices_split = np.array_split(np.arange(self.cnc_params["n_z"]),n_cores)
@@ -213,13 +219,21 @@ class cluster_number_counts:
             def f_mp(rank,out_q):
 
                 return_dict = {}
+                if return_profile_params:
+                    return_dict["profile_params"] = {}
 
                 for i in range(0,len(indices_split[rank])):
 
-                    ln_M,hmf_eval = self.halo_mass_function.eval_hmf(self.redshift_vec[indices_split[rank][i]],log=True,volume_element=volume_element)
+                    if return_profile_params:
+                        ln_M,hmf_eval,profile_params = self.halo_mass_function.eval_hmf(self.redshift_vec[indices_split[rank][i]],log=True,volume_element=volume_element,return_profile_params=True)
+                    else:
+                        ln_M,hmf_eval = self.halo_mass_function.eval_hmf(self.redshift_vec[indices_split[rank][i]],log=True,volume_element=volume_element)
 
                     return_dict[str(indices_split[rank][i])] = hmf_eval
                     return_dict["ln_M"] = ln_M
+
+                    if return_profile_params:
+                        return_dict["profile_params"][str(indices_split[rank][i])] = profile_params
 
                 if n_cores > 1:
 
@@ -236,6 +250,8 @@ class cluster_number_counts:
             for i in range(0,len(self.redshift_vec)):
 
                 self.hmf_matrix[i] = return_dict[str(i)]
+                if return_profile_params:
+                    self.profile_params[i] = return_dict["profile_params"][str(i)]
 
         elif self.cnc_params["hmf_calc"] == "MiraTitan":
 

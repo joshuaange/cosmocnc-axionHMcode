@@ -70,7 +70,7 @@ class halo_mass_function:
                                                          n=cosmology.cosmo_params["n_s"])
 
     def eval_hmf(self,redshift,log=False,volume_element=False,save_sigma_r=False,load_sigma_r=False,
-    M_min=None,M_max=None,n_points=None):
+    M_min=None,M_max=None,n_points=None,return_profile_params=False):
 
         if M_min is None:
 
@@ -129,23 +129,44 @@ class halo_mass_function:
                     n_coarse = self.cosmology.cosmo_params["n_mass_points_coarse"]
                     M_vec_coarse = np.exp(np.linspace(np.log(M_vec.min()), np.log(M_vec.max()), n_coarse))
                     R_200c_coarse = (3. * M_vec_coarse / (4. * np.pi * rho_crit_z * Del))**(1./3.)
-                    
-                    Mvir_coarse = find_M_vir_from_M_200c(M_vec_coarse, R_200c_coarse, 
-                                                       rho_m, rho_crit_z,
-                                                       Delta_vir, c_min, redshift, Om0, sigma_r,
-                                                       self.cosmology.normalisation_cached, delta_c, E_z,
-                                                       self.cosmology.D_grid_z_full, self.cosmology.D_grid_full,
-                                                       min_factor = 0.1, max_factor=20)
+
+                    if return_profile_params:
+                        Mvir_coarse, R_vir_vec_coarse, r_s_vec_coarse, delta_char_vec_coarse = find_M_vir_from_M_200c(M_vec_coarse, R_200c_coarse, 
+                                                           rho_m, rho_crit_z,
+                                                           Delta_vir, c_min, redshift, Om0, sigma_r,
+                                                           self.cosmology.normalisation_cached, delta_c, E_z,
+                                                           self.cosmology.D_grid_z_full, self.cosmology.D_grid_full,
+                                                           min_factor = 0.1, max_factor=20, return_profile_params=return_profile_params)
                     
                     # Interpolate onto full M_vec grid in log-log space
-                    Mvir_vec = np.exp(np.interp(np.log(M_vec), np.log(M_vec_coarse), np.log(Mvir_coarse)))
+                    if return_profile_params:
+                        Mvir_vec, R_vir_vec, r_s_vec, delta_char_vec = np.exp(np.interp(np.log(M_vec), np.log(M_vec_coarse), np.log(Mvir_coarse))),\
+                                                                       np.exp(np.interp(np.log(M_vec), np.log(M_vec_coarse), np.log(R_vir_vec_coarse))),\
+                                                                       np.exp(np.interp(np.log(M_vec), np.log(M_vec_coarse), np.log(r_s_vec_coarse))),\
+                                                                       np.exp(np.interp(np.log(M_vec), np.log(M_vec_coarse), np.log(delta_char_vec_coarse)))
+                    else:
+                        Mvir_coarse = find_M_vir_from_M_200c(M_vec_coarse, R_200c_coarse, 
+                                                           rho_m, rho_crit_z,
+                                                           Delta_vir, c_min, redshift, Om0, sigma_r,
+                                                           self.cosmology.normalisation_cached, delta_c, E_z,
+                                                           self.cosmology.D_grid_z_full, self.cosmology.D_grid_full,
+                                                           min_factor = 0.1, max_factor=20)
+                        Mvir_vec = np.exp(np.interp(np.log(M_vec), np.log(M_vec_coarse), np.log(Mvir_coarse)))
                 else:
-                    Mvir_vec = find_M_vir_from_M_200c(M_vec, R_200c, 
-                                                       rho_m, rho_crit_z,
-                                                       Delta_vir, c_min, redshift, Om0, sigma_r,
-                                                       self.cosmology.normalisation_cached, delta_c, E_z,
-                                                       self.cosmology.D_grid_z_full, self.cosmology.D_grid_full,
-                                                       min_factor = 0.1, max_factor=20)
+                    if return_profile_params:
+                        Mvir_vec, R_vir_vec, r_s_vec, delta_char_vec = find_M_vir_from_M_200c(M_vec, R_200c, 
+                                                                       rho_m, rho_crit_z,
+                                                                       Delta_vir, c_min, redshift, Om0, sigma_r,
+                                                                       self.cosmology.normalisation_cached, delta_c, E_z,
+                                                                       self.cosmology.D_grid_z_full, self.cosmology.D_grid_full,
+                                                                       min_factor = 0.1, max_factor=20, return_profile_params=return_profile_params)
+                    else:
+                        Mvir_vec = find_M_vir_from_M_200c(M_vec, R_200c, 
+                                                           rho_m, rho_crit_z,
+                                                           Delta_vir, c_min, redshift, Om0, sigma_r,
+                                                           self.cosmology.normalisation_cached, delta_c, E_z,
+                                                           self.cosmology.D_grid_z_full, self.cosmology.D_grid_full,
+                                                           min_factor = 0.1, max_factor=20)
                 #Mvir_vec_with_h_units = Mvir_vec*self.h # Msol/h
                 R_vir = (3. * Mvir_vec / (4. * np.pi * rho_m * Delta_vir))**(1./3.) # Mpc/h
                 #R_vir_with_h_units = (3. * Mvir_vec_with_h_units / (4. * np.pi * rho_m_with_h_units * Delta_vir))**(1./3.) # Mpc/h
@@ -321,7 +342,15 @@ class halo_mass_function:
 
             hmf[:,np.where(M_vec < self.M_min_cutoff)[0]] = 0.
 
-        return M_eval,hmf
+        if return_profile_params:
+            return M_eval, hmf, {
+                'rho_crit'   : rho_crit_z,
+                'R_vir'      : R_vir_vec,
+                'r_s'        : r_s_vec,
+                'delta_char' : delta_char_vec,
+                'rho_m'      : rho_m  # scalar, same for all M at this z
+            }
+        return M_eval, hmf
 
 class sigma_R:
 
@@ -517,7 +546,7 @@ def func_axionHMcode_delta_c(redshift, Om0, G_a, E_z, g_a, version='dome'):
 def find_M_vir_from_M_200c(M_vec_with_h, R_200c_with_h, rho_m_with_h, rho_crit_z_with_h,
                             Delta_vir, c_min, redshift, Om0, sigma_r, 
                             normalisation, delta_c, E_z, D_grid_z_full, D_grid_full,
-                            min_factor = 0.1, max_factor=20):
+                            min_factor = 0.1, max_factor=20,return_profile_params=False):
     def g(x):
         # NFW enclosed mass shape function
         return np.log(1. + x) - x / (1. + x)
@@ -569,7 +598,19 @@ def find_M_vir_from_M_200c(M_vec_with_h, R_200c_with_h, rho_m_with_h, rho_crit_z
 
         log_Mvir = brentq(residual_single, log_lo, log_hi,
                           args=(M200c, R200c), xtol=1e-8, rtol=1e-6)
-        return np.exp(log_Mvir)
+        Mvir = np.exp(log_Mvir)
+
+        if return_profile_params:
+            # recompute profile quantities at solution
+            z_f        = z_formation_interp(Mvir)
+            conc       = c_min * (1. + z_f) / (1. + redshift)
+            R_vir_sol  = (3. * Mvir / (4. * np.pi * rho_m_with_h * Delta_vir))**(1./3.)
+            r_s_sol    = R_vir_sol / conc
+            delta_char_sol = Delta_vir * conc**3 / (3. * g(conc))
+
+            return Mvir, R_vir_sol, r_s_sol, delta_char_sol
+
+        return Mvir
         
     #solve_vec = np.vectorize(solve_single)
     #return solve_vec(M_vec_with_h, R_200c_with_h)
